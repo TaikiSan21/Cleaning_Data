@@ -1,0 +1,101 @@
+---
+title: "README"
+author: "Taiki Sakai"
+date: "September 26, 2015"
+output: html_document
+---
+
+### Script Explanation
+
+The first step in our script is to extract the names of the variables from the
+features document, and then transform these names so that they fit with R standard
+naming conventions and so that ambiguous parts of the name are more explanatory.
+
+```{r eval=FALSE}
+features <- read.table("UCI HAR Dataset/features.txt")
+fixedFeat <- gsub("\\()","",features[,2])
+fixedFeat <- gsub("-","_",fixedFeat)
+fixedFeat <- gsub("^f","freq",fixedFeat)
+fixedFeat <- gsub("^t","time",fixedFeat)
+fixedFeat <- gsub("Acc","Accel",fixedFeat)
+fixedFeat <- gsub("Mag","Magnitude",fixedFeat)
+```
+
+fixedFeat stores a new versions of the names where we have removed the () and changed -
+to _ to be in line with R column naming conventions.
+
+We then make the names more descriptive by replacing t and f with time and freq, and expanding
+Acc and Mag to Accel and Magnitude.
+
+Next we read in our datasets. The X tables contain our data, so we will name the columns using the 
+fixedFeat vector we just created.
+
+```{r eval=FALSE}
+Xtest <- read.table("UCI HAR Dataset/test/X_test.txt", col.names=fixedFeat)
+Xtrain <- read.table("UCI HAR Dataset/train/X_train.txt", col.names=fixedFeat)
+Ytest <- read.table("UCI HAR Dataset/test/y_test.txt")
+Ytrain <- read.table("UCI HAR Dataset/train/y_train.txt")
+testSub <- read.table("UCI HAR Dataset/test/subject_test.txt")
+trainSub <- read.table("UCI HAR Dataset/train/subject_train.txt")
+actLabels <- read.table("UCI HAR Dataset/activity_labels.txt")
+```
+
+The Y tables contain the activity type indicators as a 1-6 for each observation. The subject tables contain
+the subject ID for each observation. The activity labels table tells us how to convert the 1-6 to an activity name.
+
+Before we merge the test and training datasets, we will filter the existing data so that our merged object is smaller.
+We begin by creating a logical vector to find column names containing "mean" and "std" so that we only have data
+for the means and standard deviations. We subtract off the meanFreq values that get caught by this grep as they do not
+have a corresponding std value and thus do not seem to be of the same sort as the other mean values. We also are not 
+taking the values at the end of the dataset of the form angle(gravityMean ,... ) as these are angle measurements. 
+These are missed by the grep because it is case sensitive.
+
+```{r, eval=FALSE}
+meanstd <- as.logical(grepl("mean", fixedFeat) + 
+                            grepl("std", fixedFeat) - 
+                            grepl("meanFreq", fixedFeat))
+```
+
+Next simply apply this logical vector to the datasets so that we have smaller tables containing only mean and std data.
+
+```{r, eval=FALSE}
+Xtest <- Xtest[,meanstd]
+Xtrain <- Xtrain[,meanstd]
+```
+
+Now we create new columns on our test and training sets for the SubjectID and Activity variables. We must
+do this before merging so that the correct IDs are given to the correct observations. The activity names
+are created by casting the 1-6 values as a factor variable with the corresponding labels read in from the
+activity text file. 
+
+```{r, eval=FALSE}
+Xtest$SubjectID <- testSub$V1
+Xtrain$SubjectID <- trainSub$V1
+
+Xtest$ActivityName <- factor(Ytest$V1,labels = actLabels$V2)
+Xtrain$ActivityName <- factor(Ytrain$V1, labels=actLabels$V2)
+```
+
+Now we load the Data Table package for easier calculations, and we merge the two datasets together.
+
+```{r, eval=FALSE}
+library(data.table)
+merged <- data.table(rbind(Xtrain, Xtest))
+```
+
+Now we create our tidy data table of the means of each of the columns for each SubjectID, ActivityName pairs.
+This is where Data Tables make things much simpler. The .SD gives a subset of the datatable for each group that
+we group by (see documentation for a more in depth explanation of .SD) so the lapply command allows us to easily 
+calculate the mean for every column.
+
+```{r, eval=FALSE}
+tidyMeans<- merged[, lapply(.SD,mean), by=c("SubjectID","ActivityName")]
+```
+
+All thats left is to order by SubjectID to make a more logical ordering of our data and output to a text file.
+
+```{r, eval=FALSE}
+tidyMeans<- tidyMeans[order(SubjectID),]
+
+write.table(tidyMeans, "TidyData.txt", row.names=FALSE)
+```
